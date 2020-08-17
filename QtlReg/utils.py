@@ -4,7 +4,7 @@ from scipy.ndimage import gaussian_filter
 
 def make_lesion(img):
     lesion = np.zeros(img.shape)
-    mskx, msky = np.where(img >= 0)
+    mskx, msky = np.where(img >= (10**(-3)))
     ind = np.random.randint(0, mskx.shape[0])
     mskx = mskx[ind]
     msky = msky[ind]

@@ -10,7 +10,6 @@ from torchvision.utils import save_image
 import numpy as np
 from sklearn.model_selection import train_test_split
 from keras.datasets import fashion_mnist
-from keras.datasets import mnist
 import scipy.io as spio
 
 
@@ -35,7 +34,7 @@ parser.add_argument('--batch-size',
                     help='input batch size for training (default: 128)')
 parser.add_argument('--epochs',
                     type=int,
-                    default=100,
+                    default=200,
                     metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--no-cuda',
@@ -66,27 +65,53 @@ kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 
 
 #########DATA#############
-dim=784
+
 def create_data(frac_anom):
 
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    (X, _), (_, _) = mnist.load_data()
-    X = X / 255.0
-    X = np.clip(X, 0, 1)
-    X = X.astype('float32')
-    X_train, X_valid = train_test_split(X, test_size=0.25,random_state=10003)
+    (X, X_lab), (_test_images, _test_lab) = fashion_mnist.load_data()
+    X_lab = np.array(X_lab)
 
+    # find bags
+    ind = np.isin(X_lab, (0, 1, 2, 3, 4, 5, 6, 8))  #(1, 5, 7, 9)
+    X_lab_outliers = X_lab[ind]
+    X_outliers = X[ind]
+
+    # find sneaker and ankle boots
+    ind = np.isin(X_lab, (7, 9))  # (0, 2, 3, 4, 6))  #
+    X_lab = X_lab[ind]
+    X = X[ind]
+    X = X / 255.0
+
+
+    Nsamp = np.int(np.rint(len(X) * frac_anom)) + 1
+    X_outliers = X_outliers / 255.0
+    X[:Nsamp, :, :] = X_outliers[:Nsamp, :, :]
+    X_lab[:Nsamp] = 10
+
+    X = np.clip(X, 0, 1)
+    X_train, X_valid, X_lab_train, X_lab_valid = train_test_split(
+        X, X_lab, test_size=0.33, random_state=10003)
     X_train = X_train.reshape((len(X_train), np.prod(X_train.shape[1:])))
     X_valid = X_valid.reshape((len(X_valid), np.prod(X_valid.shape[1:])))
 
+    train_data = []
+    for i in range(len(X_train)):
+        train_data.append(
+            [torch.from_numpy(X_train[i]).float(), X_lab_train[i]])
 
-    train_loader = torch.utils.data.DataLoader(X_train,
+    test_data = []
+    for i in range(len(X_valid)):
+        test_data.append(
+            [torch.from_numpy(X_valid[i]).float(), X_lab_valid[i]])
+
+    train_loader = torch.utils.data.DataLoader(train_data,
                                                batch_size=batch_size,
                                                shuffle=True)
-    test_loader = torch.utils.data.DataLoader(X_valid,
-                                              batch_size=len(X_valid),
+    test_loader = torch.utils.data.DataLoader(test_data,
+                                              batch_size=len(test_data),
                                               shuffle=False)
 
     return train_loader, test_loader
@@ -176,7 +201,7 @@ def beta_loss_function(recon_x, x,mu,logvar,beta,Q):
 
    
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    return MSE+0.01*KLD
+    return MSE+KLD
 ##########################################
 
 
@@ -185,7 +210,7 @@ def train(epoch, beta_val):
     model.train()
     train_loss = 0
     #    for batch_idx, data in enumerate(train_loader):
-    for batch_idx, (data) in enumerate(train_loader):
+    for batch_idx, (data, data_lab) in enumerate(train_loader):
         #    for batch_idx, data in enumerate(train_loader):
         #data = (data.gt(0.5).type(torch.FloatTensor)).to(device)
         data = (data).to(device)
@@ -196,8 +221,8 @@ def train(epoch, beta_val):
         regularize_loss=model.sparse_loss()
         reg_weight=0.01
 
-        loss_Q1 = beta_loss_function(recon_batch[:,0,:], data, mu,logvar, beta_val,0.85)
-        loss_Q2= beta_loss_function(recon_batch[:,1,:], data, mu,logvar, beta_val,0.85)
+        loss_Q1 = beta_loss_function(recon_batch[:,0,:], data, mu,logvar, beta_val,0.15)
+        loss_Q2= beta_loss_function(recon_batch[:,1,:], data, mu,logvar, beta_val,0.5)
         loss_Q3 = beta_loss_function(recon_batch[:,2,:], data, mu,logvar ,beta_val, 0.85)
         loss=(loss_Q1+loss_Q2+loss_Q3)/3+reg_weight*regularize_loss
         loss.backward()
@@ -219,7 +244,7 @@ def train(epoch, beta_val):
 def test(frac_anom, beta_val):
     model.eval()
     with torch.no_grad():
-        for i, (data) in enumerate(test_loader):
+        for i, (data, data_lab) in enumerate(test_loader):
         
             data = (data).to(device)
             recon_batch, mu, logvar = model(data)
@@ -227,7 +252,7 @@ def test(frac_anom, beta_val):
             
             if i == 0:
                 n = min(data.size(0), 100)
-                samp = np.arange(10)  # [
+                samp = np.arange(200)  # [
                 #1 - 1, 101 - 1, 5 - 1, 7 - 1, 15 - 1, 109 - 1, 120 - 1,
                 #   26 - 1, 30 - 1, 33 - 1
                 # ]  #np.arange(200) #[4, 14, 50, 60, 25, 29, 32, 65]
@@ -240,7 +265,7 @@ def test(frac_anom, beta_val):
 
                 ])
                 save_image(comparison.cpu(),
-                           'results/mnist_recon_shallow_' +
+                           'results/fashion_mnist_recon_shallow_' +
                            str(beta_val) + '_' + str(frac_anom) + '.png',
                            nrow=n)
 
@@ -272,9 +297,10 @@ if __name__ == "__main__":
                       (epoch, betaval, frac_anom))
 
                 test(frac_anom, beta_val=betaval)
-            torch.save(model.state_dict(), 'results/VAE_QR.pth')
 
-        
+    print('saving the model')
+    torch.save(model.state_dict(), 'results/VAE_QR.pth')
+    print('done')   
 
 
 

@@ -126,7 +126,7 @@ def test(epoch):
                 comparison = torch.cat([
                     data[:n],
                     recon_batch[:,dim:dim*2].view(args.batch_size, 1, 28, 28)[:n],
-                    (torch.abs(recon_batch[:,dim*2:dim*3]-recon_batch[:,dim:dim*2])/2).view(args.batch_size, 1, 28, 28)[:n],
+                    (torch.abs(recon_batch[:,dim*2:dim*3]-recon_batch[:,dim:dim*2])/2).view(args.batch_size, 1, 28, 28)[:n]
 
                 ])
                 save_image(comparison.cpu(),
