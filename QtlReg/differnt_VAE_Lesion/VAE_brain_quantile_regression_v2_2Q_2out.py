@@ -94,7 +94,7 @@ lr = 3e-4
 beta =0
 
 ##########load low res net##########
-model=UNet(3, 9).cuda()
+model=UNet(3, 3).cuda()
 #load_model(epoch,G.encoder, G.decoder,LM)
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
@@ -103,12 +103,13 @@ optimizer = optim.Adam(model.parameters(), lr=lr)
 
 # Reconstruction + KL divergence losses summed over all elements and batch
 def loss_function(recon_x, x, mu, logvar, Q=0.5):
+    msk = torch.tensor(x> 1e-6).float()
     
-    MSE = torch.sum(torch.sum(torch.max(Q * (recon_x - x), (Q - 1) * (recon_x - x)).view(-1, 64*64*3),(1)))
+    MSE = torch.sum(torch.sum(torch.max(Q * (x-recon_x ), (Q - 1) * (x-recon_x)).view(-1, 64*64*3),(1)))
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return MSE+0.1* KLD
+    return MSE+0.8* KLD
 
 
 def train(epoch, Q=0.5):
@@ -118,9 +119,9 @@ def train(epoch, Q=0.5):
         data = data.to(device)
         optimizer.zero_grad()
         reg_weight=0.001
-        mu, logvar, recon_batch = model(data)
+        mu, logvar, Q15,Q50 = model(data)
         regularize_loss=model.sparse_loss()
-        loss = (loss_function(recon_batch[:,0:3,:,:], data, mu,logvar, 0.15)+loss_function(recon_batch[:,3:6,:,:], data, mu,logvar, 0.5)+loss_function(recon_batch[:,6:9,:,:], data, mu,logvar, 0.85))/3+regularize_loss*reg_weight
+        loss = (loss_function(Q15, data, mu,logvar, 0.15)+loss_function(Q50, data, mu,logvar, 0.5))/2+regularize_loss*reg_weight
         loss.backward()
         train_loss += loss.item()
         optimizer.step()
@@ -140,19 +141,18 @@ def test(epoch, Q=0.5):
     with torch.no_grad():
         for i, data in enumerate(test_loader):
             data = data.to(device)
-            mu, logvar, recon_batch = model(data)
-            reg_weight=0.01
-            test_loss += ((loss_function(recon_batch[:,0:3,:,:], data, mu,logvar, 0.15)+loss_function(recon_batch[:,3:6,:,:], data, mu,logvar, 0.5)+loss_function(recon_batch[:,6:9,:,:], data, mu,logvar, 0.85))/3).item()
+            mu, logvar, Q15,Q50 = model(data)
+            #reg_weight=0.01
+            test_loss += ((loss_function(Q15, data, mu,logvar, 0.15)+loss_function(Q50, data, mu,logvar, 0.5))/2).item()
             if i == 0:
                 n = min(data.size(0), 8)
                 comparison = torch.cat([
                     data[:n, [2], ],
-                    recon_batch.view(args.batch_size, 9, 64, 64)[:n, [2], ],
-                    recon_batch.view(args.batch_size, 9, 64, 64)[:n, [5], ],
-                    recon_batch.view(args.batch_size, 9, 64, 64)[:n, [8], ]
+                    Q15.view(args.batch_size, 3, 64, 64)[:n, [2], ],
+                    Q50.view(args.batch_size, 3, 64, 64)[:n, [2], ]           
                 ])
                 save_image(comparison.cpu(),
-                           'results/VAE/recon_mean_' + str(epoch) + '_' + str(Q) +
+                           'results/recon_mean_' + str(epoch) + '_' + str(Q) +
                            '.png',
                            nrow=n)
 
@@ -169,7 +169,7 @@ if __name__ == "__main__":
         test(epoch)
         if epoch % 5 ==0 :
             torch.save(model.state_dict(),
-                   'results/VAE/VAE_QR_brain_'+str(epoch) +'.pth')
+                   'results/VAE_QR_brain_'+str(epoch) +'.pth')
     print('done')
 
     input("Press Enter to continue...")

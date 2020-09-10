@@ -11,7 +11,7 @@ def make_lesion(img):
     #    xyz = np.unravel_index(ind, shape=t1.shape)
     centr = np.array([mskx, msky])[None, :]
     blob, _ = make_blobs(n_samples=10000,
-                            n_features=2,
+                            n_features=5,
                             centers=centr,
                             cluster_std=np.random.uniform(.1, .5))
 
@@ -25,4 +25,15 @@ def make_lesion(img):
     lesion /= lesion.max()
 
     return lesion
+def make_LINE(img):
+    lesion = np.zeros(img.shape)
+    mskx = np.where(img.mean(0) >= (10**(-3)))
+    ind = np.random.randint(0, mskx.shape[0])
+   
+   
+    #    xyz = np.unravel_index(ind, shape=t1.shape)
 
+ 
+
+
+    return ind

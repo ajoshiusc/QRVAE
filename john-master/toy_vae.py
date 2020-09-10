@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Apr 26 08:11:10 2019
-
 @author: nsde
 """
 #%%
@@ -19,6 +18,7 @@ from utils import batchify, dist, translatedSigmoid, RBF, PosLinear, Reciprocal
 from itertools import chain
 from locality_sampler import gen_Qw, locality_sampler, get_pseupoch, local_batchify
 from sklearn.cluster import KMeans
+from universal_divergence import estimate
 sns.set()
 
 #%%
@@ -355,26 +355,26 @@ if __name__ == '__main__':
     fig2 = fig2.map_lower(sns.kdeplot, cmap="Blues_d")
     fig2 = fig2.map_diag(sns.kdeplot, lw=3, legend=False)
     set_axes(fig2)
-    savefig(2)
+    #savefig(2)
     
     fig3 = plt.figure()
     plt.plot(loss, lw=2)
     plt.xlabel('iter')
     plt.ylabel('elbo')
-    savefig(3)
+    #savefig(3)
     
     fig4 = plt.figure()
     sns.scatterplot(z[:,0].detach(), z[:,1].detach())
     if hasattr(model, "C"):
         sns.scatterplot(model.C.detach()[:,0], model.C.detach()[:,1])
     plt.axis([-4,4,-4,4])
-    savefig(4)    
+    #savefig(4)    
     
     fig5 = plt.figure()
     plt.plot(var, lw=2)
     plt.xlabel('iter')
     plt.ylabel('mean var')
-    savefig(5)
+    #savefig(5)
     
     fig6 = plt.figure()
     grid = np.stack([m.flatten() for m in np.meshgrid(np.linspace(-4,4,200), np.linspace(4,-4,200))]).T.astype('float32')
@@ -394,5 +394,4 @@ if __name__ == '__main__':
     fig7 = fig7.map_diag(sns.kdeplot, lw=3, legend=False)
     set_axes(fig7)
     savefig(7)
-    
-    
+    print(estimate(Xtrain, x_samp.detach().numpy()))

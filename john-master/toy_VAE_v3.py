@@ -52,9 +52,9 @@ class basemodel(nn.Module):
         x_mu = self.decoder(z) 
         prior = D.Independent(D.Normal(torch.zeros_like(z),
                                        torch.ones_like(z)), 1)
-        log_px_Q1 = torch.sum(torch.max(0.15 * (x_mu[:,0:4] - x), (0.15 - 1) * (x_mu[:,0:4] - x)).view(-1, 4),(1))
-        log_px_Q2 = torch.sum(torch.max(0.5 * (x_mu[:,4:8] - x), (0.5 - 1) * (x_mu[:,4:8] - x)).view(-1, 4),(1))
-        log_px_Q3= torch.sum(torch.max(0.85 * (x_mu[:,8:12] - x), (0.85 - 1) * (x_mu[:,8:12] - x)).view(-1, 4),(1))
+        log_px_Q1 = torch.sum(torch.max(0.15 * ( x-x_mu[:,0:4]), (0.15 - 1) * ( x-x_mu[:,0:4])).view(-1, 4),(1))
+        log_px_Q2 = torch.sum(torch.max(0.5 * (x-x_mu[:,4:8]), (0.5 - 1) * (x-x_mu[:,4:8])).view(-1, 4),(1))
+        log_px_Q3= torch.sum(torch.max(0.85 * (x-x_mu[:,8:12]), (0.85 - 1) * (x-x_mu[:,8:12])).view(-1, 4),(1))
         log_px=(log_px_Q1+log_px_Q2+log_px_Q3)/3
         kl = q_dist.log_prob(z) - prior.log_prob(z)
         elbo = -log_px - 0.28*kl
