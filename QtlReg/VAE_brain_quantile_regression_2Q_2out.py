@@ -9,13 +9,9 @@ from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from keras.datasets import mnist
-
-import random
+from vaemodel_brain_2out import VAE_Generator as VAE
 from sklearn.model_selection import train_test_split
 import numpy as np
-from VAE import UNet
-random.seed(4)
-
 
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
 parser.add_argument('--batch-size',
@@ -89,44 +85,27 @@ test_loader = torch.utils.data.DataLoader(x_test.astype(np.float32),
                                           **kwargs)
 input_channels = 3
 hidden_size = 128
-max_epochs =100
-lr = 3e-3
-beta =0
 
-##########load low res net##########
-model=UNet(3, 6).cuda()
-#load_model(epoch,G.encoder, G.decoder,LM)
-optimizer = optim.Adam(model.parameters(), lr=lr)
+model = VAE(input_channels, hidden_size).to(device)
+optimizer = optim.Adam(model.parameters(), lr=3e-4)
 
-#######losss#################
-def prob_loss_function(recon_x, var_x, x, mu, logvar):
-    # x = batch_sz x channel x dim1 x dim2
-    
-    dim1=1
-    x_temp = x.repeat(dim1, 1, 1, 1)
-    msk = torch.tensor(x_temp > 1e-6).float()
-    mskvar = torch.tensor(x_temp < 1e-6).float()
-
-
-    msk2 = torch.tensor(x_temp > -1).float()
-    NDim = torch.sum(msk2,(1,2,3))
-    std = var_x**(0.5)
-    const = (-torch.sum(var_x.log()*msk+mskvar, (1, 2, 3))) / 2
-
-
-
-    term1 = torch.sum((((recon_x - x_temp)*msk / std)**2), (1, 2, 3))
-    #const2 = -(NDim / 2) * math.log((2 * math.pi))
-
-    prob_term = const + (-(0.5) * term1) #+const2
-    BBCE = torch.sum(prob_term / dim1)
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-    return -BBCE+0.05*KLD 
 
 # Reconstruction + KL divergence losses summed over all elements and batch
+def loss_function(recon_x, x, mu, logvar, Q=0.5):
+    
+    msk = torch.tensor(x> 1e-6).float()
+    recon_x=recon_x*msk
+    x=x*msk
+    MSE = torch.sum(torch.sum(torch.max(Q * (x-recon_x ), (Q - 1) * (x-recon_x)).view(-1, 64*64*3),(1))) 
 
+    # see Appendix B from VAE paper:
+    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
+    # https://arxiv.org/abs/1312.6114
+    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    zar=torch.sum(1 + logvar - mu.pow(2) - logvar.exp(),(1))
+    KLD = -0.5 * torch.sum(zar)
 
+    return MSE+KLD
 
 def train(epoch, Q=0.5):
     model.train()
@@ -134,13 +113,8 @@ def train(epoch, Q=0.5):
     for batch_idx, data in enumerate(train_loader):
         data = data.to(device)
         optimizer.zero_grad()
-        reg_weight=0.001
-        mu, logvar, recon_batch = model(data)
-
-        regularize_loss=model.sparse_loss()
-        mean_x=recon_batch[:,0:3,:,:]
-        var_x=(recon_batch[:,3:6,:,:])
-        loss = prob_loss_function(mean_x, var_x, data, mu, logvar)+regularize_loss*reg_weight
+        mu, logvar, Q50,Q15 = model(data)
+        loss = (loss_function(Q15, data, mu, logvar, 0.15)+loss_function(Q50, data, mu, logvar, 0.5))
         loss.backward()
         train_loss += loss.item()
         optimizer.step()
@@ -160,17 +134,15 @@ def test(epoch, Q=0.5):
     with torch.no_grad():
         for i, data in enumerate(test_loader):
             data = data.to(device)
-            mu, logvar, recon_batch = model(data)
-            reg_weight=0.01
-            mean_x=recon_batch[:,0:3,:,:]
-            var_x=recon_batch[:,3:6,:,:] 
-            test_loss += prob_loss_function(mean_x, var_x, data, mu, logvar)
+            mu, logvar, Q50,Q15 = model(data)
+            loss = (loss_function(Q15, data, mu, logvar, 0.15)+loss_function(Q50, data, mu, logvar, 0.5))
+            test_loss +=loss
             if i == 0:
                 n = min(data.size(0), 8)
                 comparison = torch.cat([
                     data[:n, [2], ],
-                    recon_batch.view(args.batch_size, 6, 64, 64)[:n, [2], ],
-                    ((recon_batch.view(args.batch_size, 6, 64, 64)[:n, [5], ]))**(0.5)*3        
+                    Q50.view(args.batch_size, 3, 64, 64)[:n, [2], ],
+                    Q15.view(args.batch_size, 3, 64, 64)[:n, [2], ]
                 ])
                 save_image(comparison.cpu(),
                            'results/recon_mean_' + str(epoch) + '_' + str(Q) +
@@ -183,14 +155,21 @@ def test(epoch, Q=0.5):
 
 if __name__ == "__main__":
 
-    #model.load_state_dict(torch.load('results/RAE_sum/RRAE_QR_brain_0.pth'))
-    for epoch in range(args.epochs):
-        train(epoch)
-            
-        test(epoch)
-        if epoch % 5 ==0 :
+    for Q in [0.5]: #np.arange(1e-6,1-1e-6,.05):#
+        for epoch in range(args.epochs):
+            train(epoch, Q)
+            '''test(epoch, Q)
+            with torch.no_grad():
+                sample = torch.randn(64, hidden_size).to(device)
+                sample = model.decoder(sample)
+                save_image(
+                    sample[:, 2, :, :].view(64, 1, 64,
+                                            64), 'results/sample_mean_' +
+                    str(epoch) + '_' + str(Q) + '.png')'''
+            test(epoch, Q)
+            print('saving the model')
             torch.save(model.state_dict(),
-                   'results/VAE_QR_brain_'+str(epoch) +'.pth')
-    print('done')
+                   'results/VAE_QR_brain' + '_' + str(Q) + '.pth')
+        print('done')
 
     input("Press Enter to continue...")

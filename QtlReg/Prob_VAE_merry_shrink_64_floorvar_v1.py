@@ -9,13 +9,12 @@ from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from keras.datasets import mnist
-
-import random
+from VAE_model_pixel64_shrink_floorvar import VAE_Generator as VAE
 from sklearn.model_selection import train_test_split
 import numpy as np
-from VAE import UNet
-random.seed(4)
-
+from torch.autograd import Variable
+import matplotlib.pyplot as plt
+import math
 
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
 parser.add_argument('--batch-size',
@@ -89,19 +88,14 @@ test_loader = torch.utils.data.DataLoader(x_test.astype(np.float32),
                                           **kwargs)
 input_channels = 3
 hidden_size = 128
-max_epochs =100
-lr = 3e-3
-beta =0
 
-##########load low res net##########
-model=UNet(3, 6).cuda()
-#load_model(epoch,G.encoder, G.decoder,LM)
-optimizer = optim.Adam(model.parameters(), lr=lr)
+model = VAE(input_channels, hidden_size).to(device)
+opt_enc = optim.Adam(model.parameters(), lr=3e-4)
+data = next(iter(test_loader))
+fixed_batch = Variable(data).cuda()
 
-#######losss#################
 def prob_loss_function(recon_x, var_x, x, mu, logvar):
     # x = batch_sz x channel x dim1 x dim2
-    
     dim1=1
     x_temp = x.repeat(dim1, 1, 1, 1)
     msk = torch.tensor(x_temp > 1e-6).float()
@@ -121,76 +115,102 @@ def prob_loss_function(recon_x, var_x, x, mu, logvar):
     prob_term = const + (-(0.5) * term1) #+const2
     BBCE = torch.sum(prob_term / dim1)
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+   
 
-    return -BBCE+0.05*KLD 
-
-# Reconstruction + KL divergence losses summed over all elements and batch
-
+    return -BBCE + KLD
 
 
-def train(epoch, Q=0.5):
-    model.train()
+
+
+
+################################
+
+#if pret == 1:
+   #oad_model(499, G.encoder, G.decoder)
+
+##############train#####################
+train_loss = 0
+valid_loss = 0
+pay=0
+beta=0
+valid_loss_list, train_loss_list = [], []
+for epoch in range(args.epochs):
     train_loss = 0
+    valid_loss = 0
     for batch_idx, data in enumerate(train_loader):
-        data = data.to(device)
-        optimizer.zero_grad()
-        reg_weight=0.001
-        mu, logvar, recon_batch = model(data)
+        batch_size = data.size()[0]
 
-        regularize_loss=model.sparse_loss()
-        mean_x=recon_batch[:,0:3,:,:]
-        var_x=(recon_batch[:,3:6,:,:])
-        loss = prob_loss_function(mean_x, var_x, data, mu, logvar)+regularize_loss*reg_weight
-        loss.backward()
-        train_loss += loss.item()
-        optimizer.step()
+        #print (data.size())
+        data = data.to(device)
+        #datav[l2,:,row2:row2+5,:]=0
+
+        mean, logvar, rec_enc, var_enc = model(data)
+        if beta == 0:
+            prob_err = prob_loss_function(rec_enc, var_enc, data, mean,
+                                          logvar)
+        else:
+            dummy=0
+        err_enc = prob_err
+        opt_enc.zero_grad()
+        err_enc.backward()
+        opt_enc.step()
+        train_loss += prob_err.item()
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader),
-                loss.item() / len(data)))
+                err_enc.item() / len(data)))
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
         epoch, train_loss / len(train_loader.dataset)))
+    train_loss /= len(train_loader.dataset)
 
 
-def test(epoch, Q=0.5):
     model.eval()
-    test_loss = 0
     with torch.no_grad():
-        for i, data in enumerate(test_loader):
+        for i,data in enumerate(test_loader):
             data = data.to(device)
-            mu, logvar, recon_batch = model(data)
-            reg_weight=0.01
-            mean_x=recon_batch[:,0:3,:,:]
-            var_x=recon_batch[:,3:6,:,:] 
-            test_loss += prob_loss_function(mean_x, var_x, data, mu, logvar)
+            mean, logvar, valid_enc, valid_var_enc = model(data)
+            if beta == 0:
+                prob_err = prob_loss_function(valid_enc, valid_var_enc, data,
+                                              mean, logvar)
+            else:
+                dummy=0
+            valid_loss += prob_err.item()
             if i == 0:
                 n = min(data.size(0), 8)
+                msk = torch.tensor(data[:n, [2], ]> 1e-6).float()
                 comparison = torch.cat([
                     data[:n, [2], ],
-                    recon_batch.view(args.batch_size, 6, 64, 64)[:n, [2], ],
-                    ((recon_batch.view(args.batch_size, 6, 64, 64)[:n, [5], ]))**(0.5)*3        
+                    (valid_enc.view(args.batch_size, 3, 64, 64)[:n, [2], ])*msk,
+                    ((valid_var_enc.view(args.batch_size, 3, 64, 64)[:n, [2], ])**(0.5))*3*msk
                 ])
                 save_image(comparison.cpu(),
-                           'results/recon_mean_' + str(epoch) + '_' + str(Q) +
+                           'results/recon_mean_' + str(epoch) + '_' +
                            '.png',
                            nrow=n)
-
-    test_loss /= len(test_loader.dataset)
-    print('====> Test set loss: {:.4f}'.format(test_loss))
+        valid_loss /= len(test_loader.dataset)
 
 
-if __name__ == "__main__":
 
-    #model.load_state_dict(torch.load('results/RAE_sum/RRAE_QR_brain_0.pth'))
-    for epoch in range(args.epochs):
-        train(epoch)
-            
-        test(epoch)
-        if epoch % 5 ==0 :
-            torch.save(model.state_dict(),
-                   'results/VAE_QR_brain_'+str(epoch) +'.pth')
-    print('done')
 
-    input("Press Enter to continue...")
+    print(valid_loss)
+    
+    train_loss_list.append(train_loss)
+    valid_loss_list.append(valid_loss)
+    _, _, rec_imgs, var_img = model(fixed_batch)
+    print(var_img.mean())
+    
+
+ 
+
+    #localtime = time.asctime( time.localtime(time.time()) )
+    #D_real_list_np=(D_real_list).to('cpu')
+######################################
+
+torch.save(model.state_dict(),
+                   'results/VAE_QR_brain' + '100' + '.pth')
+plt.plot(train_loss_list, label="train loss")
+plt.plot(valid_loss_list, label="validation loss")
+plt.legend()
+plt.show()
