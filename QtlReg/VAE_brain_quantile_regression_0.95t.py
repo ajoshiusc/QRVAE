@@ -11,7 +11,7 @@ from torchvision.utils import save_image
 from keras.datasets import mnist
 from vaemodel_brain_2out import VAE_Generator as VAE
 from sklearn.model_selection import train_test_split
-import numpy as npa
+import numpy as np
 
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
 parser.add_argument('--batch-size',
@@ -114,7 +114,7 @@ def train(epoch, Q=0.5):
         data = data.to(device)
         optimizer.zero_grad()
         mu, logvar, Q50,Q15 = model(data)
-        loss = (loss_function(Q15, data, mu, logvar, 0.15)+loss_function(Q50, data, mu, logvar, 0.5))
+        loss = (loss_function(Q15, data, mu, logvar, 0.025)+loss_function(Q50, data, mu, logvar, 0.975))
         loss.backward()
         train_loss += loss.item()
         optimizer.step()
