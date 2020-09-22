@@ -149,7 +149,7 @@ def prob_loss_function(recon_x, var_x, x, mu, logvar):
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
    
 
-    return -BBCE+KLD
+    return -BBCE+0.3*KLD
 
 
 def train(epoch):
@@ -197,11 +197,12 @@ def test():
 
             if i == 0:
                 n = min(data.size(0), 100)
-                samp = [96, 97, 99, 90, 14, 35, 53, 57]
+                samp = np.arange(200)
+                msk= torch.tensor(data.view(len(rec_enc), 1, 28, 28)[samp] > 0).float()
                 comparison = torch.cat([
                     data.view(len(rec_enc,), 1, 28, 28)[samp],
-                    rec_enc.view(len(rec_enc), 1, 28, 28)[samp],
-                    (var_enc**(0.5)).view(len(rec_enc), 1, 28, 28)[samp]
+                    rec_enc.view(len(rec_enc), 1, 28, 28)[samp]*msk,
+                    (var_enc*3).view(len(rec_enc), 1, 28, 28)[samp]*msk
                     
                 ])
 
