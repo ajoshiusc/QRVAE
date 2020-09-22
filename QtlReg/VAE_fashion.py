@@ -18,7 +18,7 @@ import math
 ######initialize parameters#####
 ################################
 seed = 10004
-epochs = 150
+epochs = 200
 batch_size = 120
 log_interval = 10
 CODE_SIZE = 20
@@ -106,7 +106,11 @@ class RVAE(nn.Module):
         mu_out=torch.sigmoid(self.fc4(h3))
         sigma_out=torch.sigmoid(self.fc5(h3))
         return mu_out,sigma_out
-
+    def sample(self, N):
+        z = torch.randn(N, CODE_SIZE).to(device)
+        x_mu,var= self.decode(z)
+        return x_mu,var
+    
     def forward(self, x):
         mu, logvar = self.encode(x.view(-1, 784))
         z = self.reparameterize(mu, logvar)
@@ -141,7 +145,7 @@ def prob_loss_function(recon_x, var_x, x, mu, logvar):
 
 
 
-    term1 = torch.sum((((recon_x - x_temp)*msk / std)**2), (1, 2))
+    term1 = torch.sum((((recon_x - x_temp) / std)**2), (1, 2))
     #const2 = -(NDim / 2) * math.log((2 * math.pi))
 
     prob_term = const + (-(0.5) * term1) #+const2
@@ -197,12 +201,16 @@ def test():
 
             if i == 0:
                 n = min(data.size(0), 100)
+                x_mu,var = model.sample(200)
+                x_samp = x_mu+ var* torch.randn_like(x_mu)
                 samp = np.arange(200)
                 msk= torch.tensor(data.view(len(rec_enc), 1, 28, 28)[samp] > 0).float()
+                msk_samp=torch.tensor(x_mu.view(200, 1, 28, 28)> 1e-6).float()
                 comparison = torch.cat([
                     data.view(len(rec_enc,), 1, 28, 28)[samp],
                     rec_enc.view(len(rec_enc), 1, 28, 28)[samp]*msk,
-                    (var_enc*3).view(len(rec_enc), 1, 28, 28)[samp]*msk
+                    (var_enc*3).view(len(rec_enc), 1, 28, 28)[samp]*msk,
+                    x_samp.view(200, 1, 28, 28)*msk_samp
                     
                 ])
 

@@ -18,7 +18,7 @@ import math
 ######initialize parameters#####
 ################################
 seed = 10004
-epochs = 150
+epochs = 200
 batch_size = 120
 log_interval = 10
 CODE_SIZE = 20
@@ -113,6 +113,12 @@ class RVAE(nn.Module):
         mu_out=self.decode(z)
         return  mu_out,mu, logvar 
 
+    def sample(self, N):
+        z = torch.randn(N, CODE_SIZE).to(device)
+        x_mu= self.decode(z)
+        return x_mu
+    
+
     def weight_reset(self):
 
         for m in self.modules():
@@ -127,7 +133,7 @@ optimizer = optim.Adam(model.parameters(), lr=1e-3)
 def beta_loss_function(recon_x, x,mu,logvar,beta,Q):
 
     msk = torch.tensor(x > 1e-6).float()
-    recon_x=recon_x*msk
+    recon_x=recon_x
     if beta > 0:
         # If beta is nonzero, use the beta entropy
         #BBCE = Gaussian_CE_loss(recon_x.view(-1, 784), x.view(-1, 784), beta)
@@ -197,12 +203,19 @@ def test():
                 #1 - 1, 101 - 1, 5 - 1, 7 - 1, 15 - 1, 109 - 1, 120 - 1,
                 #   26 - 1, 30 - 1, 33 - 1
                 # ]  #np.arange(200) #[4, 14, 50, 60, 25, 29, 32, 65]
+                x_mu= model.sample(200)
+                x_mu=torch.reshape(x_mu, (-1, 2,784))
+                var=(x_mu[:,1,:]-x_mu[:,0,:])**2
+                x_mu=x_mu[:,1,:]
+                x_samp = x_mu+ var* torch.randn_like(x_mu)
                 msk= torch.tensor(data.view(len(recon_batch), 1, 28, 28)[samp] > 0).float()
+                msk_samp=torch.tensor(x_mu.view(200, 1, 28, 28)> 0).float()
                 comparison = torch.cat([
                     data.view(len(recon_batch), 1, 28, 28)[samp],
                     (recon_batch[:,0,:].view(len(recon_batch), 1, 28, 28)[samp])*msk,
                     (recon_batch[:,1,:].view(len(recon_batch), 1, 28, 28)[samp])*msk,
-                    (((recon_batch[:,1,:]-recon_batch[:,0,:])**2).view(len(recon_batch), 1, 28, 28)[samp])*msk*3
+                    (((recon_batch[:,1,:]-recon_batch[:,0,:])**2).view(len(recon_batch), 1, 28, 28)[samp])*msk*3,
+                    x_samp.view(200, 1, 28, 28)*msk_samp
                 ])
                 save_image(comparison.cpu(),
                            'results/fashion_mnist_recon_shallow_' +
