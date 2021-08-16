@@ -200,6 +200,23 @@ save_image(comparison,
 #      (out_median.clone().detach() > .1)).float()
 
 #sig_msk = ((in_data > out_Q1) | (in_data < out_Q2)).clone().detach().float()
+msk = ((out_Q1.clone().detach() > .1)).float()
+sig_msk = ((in_data <out_median-3*out_std) | (in_data >out_median+3*out_std)).clone().detach().float()
+sig_msk = msk * sig_msk
 
+n = np.array(range(0, 16 * 16, 16))
+comparison = torch.cat([
+    in_data[n, 2:3],out_median[n, 2:3], out_Q1[n, 2:3],
+    3 * out_std[n, 2:3], 3 * abs(in_data[n, 2:3] - out_median[n, 2:3]),
+    sig_msk[n, 2:3]
+])
 
+save_image(comparison,
+           'results/QR_nwe_results/recon_QR_brain.png',
+           nrow=16,
+           scale_each=False,
+           normalize=True,
+           range=(0, 1))
+
+input("Press Enter to continue...")
 input("Press Enter to continue...")
