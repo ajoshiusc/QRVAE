@@ -18,7 +18,7 @@ import torch.utils.data
 from scipy import misc
 from torch import optim
 from torchvision.utils import save_image
-from net_QR import *
+from net_var import *
 import numpy as np
 import pickle
 import time
@@ -32,16 +32,30 @@ from PIL import Image
 im_size = 128
 
 
-def loss_function(recon_x, x, mu, logvar,Q):
-    BCE = torch.mean(torch.mean(torch.max(Q * (x-recon_x ), (Q - 1) * (x-recon_x)).view(-1, 128*128*3),(1))) 
+def loss_function(recon_x, var_x, x, mu, logvar):
+    
 
-    # see Appendix B from VAE paper:
-    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-    # https://arxiv.org/abs/1312.6114
-    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    KLD = -0.5 * torch.mean(torch.mean(1 + logvar - mu.pow(2) - logvar.exp(), 1))
-    return BCE, KLD 
+    # x = batch_sz x channel x dim1 x dim2
+    dim1=1
+    x_temp = x.repeat(dim1, 1, 1, 1)
+    msk = torch.tensor(var_x!=0).float()
+    mskvar = torch.tensor(var_x==0).float()*1e-1
 
+ 
+    std = (var_x+mskvar)**(0.5)
+    const = (-torch.mean(var_x.log()*msk+mskvar, (1, 2, 3))) / 2
+
+
+
+    term1 = torch.mean((((recon_x - x_temp) / std)**2), (1, 2, 3))
+    #const2 = -(NDim / 2) * math.log((2 * math.pi))
+
+    prob_term = const + (-(0.5) * term1) #+const2
+    BBCE = torch.mean(prob_term / dim1)
+    KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+   
+
+    return -BBCE+KLD
 
 def process_batch(batch):
     data = [np.array(Image.fromarray(x).resize([im_size, im_size])).transpose((2, 0, 1)) for x in batch]
@@ -92,21 +106,12 @@ def main():
         for x in batches:
             vae.train()
             vae.zero_grad()
-            rec, mu, logvar = vae(x)
-
-
-            loss_re_q1, loss_kl_q1 = loss_function(rec[:,0:4,:,:], x, mu, logvar,0.15)
-            loss_re_q2, loss_kl_q2 = loss_function(rec[:,4:8,:,:], x, mu, logvar,0.5)
-
-            #loss_re_q1, loss_kl_q1 = loss_function(rec[:,0:3,:,:], x, mu, logvar,0.15)
-            #loss_re_q2, loss_kl_q2 = loss_function(rec[:,3:7,:,:], x, mu, logvar,0.5)
-
-            loss_re =loss_re_q1+loss_re_q2
-            loss_kl=loss_kl_q1+loss_kl_q2
-            (loss_re + loss_kl).backward()
+            rec,var, mu, logvar = vae(x)
+            loss_re = loss_function(rec, var,x, mu, logvar)
+            loss_re.backward()
             vae_optimizer.step()
             rec_loss += loss_re.item()
-            kl_loss += loss_kl.item()
+
 
             #############################################
 
@@ -128,27 +133,15 @@ def main():
                 kl_loss = 0
                 with torch.no_grad():
                     vae.eval()
-                    x_rec, _, _ = vae(x)
-
-                    x_mean=x_rec[:,4:8,:,:]
-                    x_std=(x_rec[:,4:8,:,:]-x_rec[:,0:4,:,:])*0.025
-                    resultsample = torch.cat([x, x_mean]) * 0.5 + 0.5
-                    resultsample=torch.cat[resultsample,]
-
-                    #x_mean=x_rec[:,0:3,:,:]
-                    #x_std=(x_rec[:,3:7,:,:]-x_rec[:,0:3,:,:])*0.25
-                    #resultsample = torch.cat([x, x_mean]) * 0.5 + 0.5
-                    #resultsample=torch.cat([resultsample,x_std])
-
+                    x_rec,x_var, _, _ = vae(x)
+                    x_var=(x_var**0.50)*0.25*3
+                    resultsample = torch.cat([x, x_rec]) * 0.5 + 0.5
+                    resultsample=torch.cat([resultsample,x_var])
                     resultsample = resultsample.cpu()
                     save_image(resultsample.view(-1, 3, im_size, im_size),
                                'results_rec/QR/sample_' + str(epoch) + "_" + str(i) + '.png')
-                    x_rec = vae.decode(sample1)
-
-                    resultsample = x_rec[:,4:8,:,:] * 0.5 + 0.5
-
-                    #resultsample = x_rec[:,3:7,:,:] * 0.5 + 0.5
-
+                    x_rec,x_var = vae.decode(sample1)
+                    resultsample = x_rec * 0.5 + 0.5
                     resultsample = resultsample.cpu()
                     save_image(resultsample.view(-1, 3, im_size, im_size),
                                'results_gen/QR/sample_' + str(epoch) + "_" + str(i) + '.png')
@@ -156,7 +149,7 @@ def main():
         del batches
         del data_train
     print("Training finish!... save training results")
-    torch.save(vae.state_dict(), "results_gen/QR/VAEmodel.pkl")
+    torch.save(vae.state_dict(), "VAEmodel.pkl")
 
 if __name__ == '__main__':
     main()
